@@ -153,9 +153,17 @@
                         <span id="realtime-clock">Memuat waktu...</span> WIB
                     </p>
                 </div>
-                <div class="hidden sm:flex items-center gap-3 bg-white/80 px-4 py-2 rounded-xl shadow-sm border border-white">
-                    <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></div>
-                    <span class="text-sm font-bold text-slate-700">Online</span>
+                <div class="flex items-center gap-3">
+                    <div class="hidden sm:flex items-center gap-2 bg-white/80 px-4 py-2.5 rounded-xl shadow-sm border border-white">
+                        <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></div>
+                        <span class="text-sm font-bold text-slate-700">{{ Auth::user()->name }}</span>
+                    </div>
+                    <form action="{{ route('logout') }}" method="POST">
+                        @csrf
+                        <button type="submit" class="flex items-center justify-center p-2.5 bg-white/80 hover:bg-red-500 text-slate-600 hover:text-white border border-white rounded-xl transition-all duration-300 shadow-sm hover:shadow-md" title="Keluar">
+                            <i data-lucide="log-out" class="w-5 h-5"></i>
+                        </button>
+                    </form>
                 </div>
             </div>
 

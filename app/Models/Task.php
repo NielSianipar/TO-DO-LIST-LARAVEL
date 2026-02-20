@@ -6,6 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class Task extends Model
 {
-    // Tambahkan baris ini:
-    protected $fillable = ['nama_tugas'];
+    protected $fillable = ['nama_tugas', 'user_id', 'is_selesai'];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }
