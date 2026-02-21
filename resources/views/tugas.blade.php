@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>TaskMaster - Modern To-Do List</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; }
         .glass-card {
@@ -33,11 +35,23 @@
         
         .task-item {
             animation: slideIn 0.3s ease-out forwards;
+            cursor: grab;
+        }
+        .task-item:active {
+            cursor: grabbing;
+        }
+        .sortable-ghost {
+            opacity: 0.4;
+            background: #e2e8f0;
+            border: 2px dashed #94a3b8;
+            box-shadow: none;
         }
         @keyframes slideIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        /* Column scrollbars */
+        .kanban-col::-webkit-scrollbar { width: 4px; }
     </style>
     <script>
         tailwind.config = {
@@ -67,7 +81,7 @@
         $total = count($tasks ?? []);
         $completed = 0;
         foreach($tasks ?? [] as $t) {
-            if($t->is_selesai) $completed++;
+            if($t->status === 'done' || $t->is_selesai) $completed++;
         }
         $pending = $total - $completed;
         $progress = $total > 0 ? round(($completed / $total) * 100) : 0;
@@ -75,22 +89,26 @@
         $greetings = ['Good Morning', 'Good Afternoon', 'Good Evening'];
         $hour = date('H');
         $greeting = $hour < 12 ? $greetings[0] : ($hour < 18 ? $greetings[1] : $greetings[2]);
+
+        $doingTasks = collect($tasks)->filter(function($t) { return $t->status === 'doing' || (!$t->status && !$t->is_selesai); });
+        $onProgressTasks = collect($tasks)->filter(function($t) { return $t->status === 'on_progress'; });
+        $doneTasks = collect($tasks)->filter(function($t) { return $t->status === 'done' || $t->is_selesai && $t->status !== 'on_progress' && $t->status !== 'doing'; });
     @endphp
 
-    <div class="w-full max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+    <div class="w-full max-w-[1400px] mx-auto grid grid-cols-1 xl:grid-cols-12 gap-6 lg:gap-8">
         
         <!-- Sidebar Dashboard -->
-        <div class="glass-card rounded-[2rem] p-8 shadow-soft lg:col-span-4 flex flex-col relative overflow-hidden group">
+        <div class="glass-card rounded-[2rem] p-8 shadow-soft xl:col-span-3 flex flex-col relative overflow-hidden group">
             <div class="absolute -top-24 -right-24 w-48 h-48 bg-brand-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 group-hover:opacity-50 transition-opacity duration-700"></div>
             <div class="absolute -bottom-24 -left-24 w-48 h-48 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 group-hover:opacity-50 transition-opacity duration-700"></div>
             
             <div class="relative z-10 flex-1 flex flex-col">
                 <div class="flex items-center gap-3 mb-10">
                     <div class="p-3 bg-gradient-to-br from-brand-500 to-purple-600 rounded-2xl shadow-lg flex items-center justify-center">
-                        <i data-lucide="check-circle-2" class="text-white w-6 h-6"></i>
+                        <i data-lucide="trello" class="text-white w-6 h-6"></i>
                     </div>
                     <div>
-                        <h1 class="text-2xl font-extrabold tracking-tight text-slate-900">TaskMaster</h1>
+                        <h1 class="text-2xl font-extrabold tracking-tight text-slate-900">TaskBoard</h1>
                         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Workspace</p>
                     </div>
                 </div>
@@ -110,14 +128,14 @@
                                 <h3 class="text-xs font-bold text-slate-500">Done</h3>
                                 <i data-lucide="check-circle" class="w-4 h-4 text-emerald-500"></i>
                             </div>
-                            <p class="text-2xl font-extrabold text-emerald-600">{{ $completed }}</p>
+                            <p class="text-2xl font-extrabold text-emerald-600" id="stat-done">{{ $completed }}</p>
                         </div>
                         <div class="bg-white/60 p-4 rounded-2xl border border-white/80 shadow-sm backdrop-blur-md">
                             <div class="flex items-center justify-between mb-2">
                                 <h3 class="text-xs font-bold text-slate-500">Pending</h3>
                                 <i data-lucide="clock" class="w-4 h-4 text-orange-500"></i>
                             </div>
-                            <p class="text-2xl font-extrabold text-orange-600">{{ $pending }}</p>
+                            <p class="text-2xl font-extrabold text-orange-600" id="stat-pending">{{ $pending }}</p>
                         </div>
                     </div>
                 </div>
@@ -126,22 +144,22 @@
                     <div class="flex justify-between items-end mb-3">
                         <div>
                             <span class="text-sm font-bold text-slate-700 block">Overall Progress</span>
-                            <span class="text-xs font-medium text-slate-500">{{ $completed }} of {{ $total }} completed</span>
+                            <span class="text-xs font-medium text-slate-500" id="stat-text"><span id="stat-completed">{{ $completed }}</span> of {{ $total }} completed</span>
                         </div>
-                        <span class="text-lg font-black text-brand-600">{{ $progress }}%</span>
+                        <span class="text-lg font-black text-brand-600" id="stat-percent">{{ $progress }}%</span>
                     </div>
                     <div class="w-full bg-slate-200/50 rounded-full h-2.5 overflow-hidden">
-                        <div class="bg-gradient-to-r from-brand-500 to-purple-500 h-2.5 rounded-full transition-all duration-1000 ease-out" style="width: {{ $progress }}%"></div>
+                        <div id="stat-progress-bar" class="bg-gradient-to-r from-brand-500 to-purple-500 h-2.5 rounded-full transition-all duration-1000 ease-out" style="width: {{ $progress }}%"></div>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Main Content Area -->
-        <div class="glass-card rounded-[2rem] p-6 lg:p-10 shadow-soft lg:col-span-8 flex flex-col relative overflow-hidden bg-white/60 h-[85vh] lg:h-auto">
+        <div class="glass-card rounded-[2rem] p-6 lg:p-8 shadow-soft xl:col-span-9 flex flex-col relative overflow-hidden bg-white/60 h-[85vh] lg:h-auto">
             
             <!-- Header section -->
-            <div class="flex justify-between items-start mb-8">
+            <div class="flex justify-between items-start mb-6">
                 <div>
                     <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">{{ $greeting }}! <span class="text-2xl">😎</span></h2>
                     <p class="text-slate-500 font-medium mt-1 flex items-center gap-2">
@@ -167,74 +185,104 @@
                 </div>
             </div>
 
-            <!-- Add Task Form -->
-            <form action="/tugas" method="POST" class="mb-8 relative group shrink-0">
-                @csrf
-                <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
-                    <i data-lucide="plus" class="text-slate-400 group-focus-within:text-brand-600 transition-colors w-6 h-6"></i>
-                </div>
-                <input 
-                    type="text" 
-                    name="nama_tugas" 
-                    placeholder="Add a new task..." 
-                    autocomplete="off"
-                    required
-                    class="w-full pl-14 pr-36 py-4 bg-white border-2 border-transparent text-slate-800 rounded-2xl focus:outline-none focus:ring-0 focus:border-brand-500 transition-all shadow-sm focus:shadow-md text-lg font-semibold placeholder:text-slate-400 placeholder:font-medium"
-                >
-                <button 
-                    type="submit" 
-                    class="absolute right-2 top-2 bottom-2 bg-slate-900 hover:bg-brand-600 text-white font-bold px-8 rounded-xl transition-all duration-300 shadow-md hover:shadow-glow flex items-center gap-2"
-                >
-                    <span>Create</span>
-                </button>
-            </form>
+            <!-- Controls block: Filter & Add Task -->
+            <div class="flex flex-col sm:flex-row gap-4 mb-6 shrink-0 z-10">
+                <!-- Date Filter -->
+                <form action="/tugas" method="GET" class="relative group sm:w-1/3 lg:w-1/4 xl:w-1/5">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <i data-lucide="calendar" class="text-slate-400 group-focus-within:text-brand-500 w-5 h-5"></i>
+                    </div>
+                    <input 
+                        type="date" 
+                        name="date" 
+                        value="{{ $selectedDate ?? '' }}"
+                        onchange="this.form.submit()"
+                        class="w-full pl-11 pr-10 py-4 bg-white border-2 border-transparent text-slate-700 rounded-2xl focus:outline-none focus:ring-0 focus:border-brand-500 transition-all shadow-sm hover:shadow-md focus:shadow-md font-semibold cursor-pointer"
+                        title="Filter tugas berdasarkan tanggal"
+                    >
+                    @if(isset($selectedDate) && $selectedDate)
+                        <a href="/tugas" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 transition-colors" title="Hapus Filter">
+                            <i data-lucide="x-circle" class="w-5 h-5"></i>
+                        </a>
+                    @endif
+                </form>
 
-            <div class="flex items-center gap-4 mb-4 shrink-0">
-                <h3 class="text-sm font-extrabold text-slate-800 uppercase tracking-widest bg-slate-200/80 px-4 py-1.5 rounded-full">Tasks List</h3>
-                <div class="h-px bg-slate-200 flex-1"></div>
+                <!-- Add Task Form -->
+                <form action="/tugas" method="POST" class="relative group flex-1">
+                    @csrf
+                    <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none">
+                        <i data-lucide="plus" class="text-slate-400 group-focus-within:text-brand-600 transition-colors w-6 h-6"></i>
+                    </div>
+                    <input 
+                        type="text" 
+                        name="nama_tugas" 
+                        placeholder="Add a new task..." 
+                        autocomplete="off"
+                        required
+                        class="w-full pl-14 pr-32 py-4 bg-white border-2 border-transparent text-slate-800 rounded-2xl focus:outline-none focus:ring-0 focus:border-brand-500 transition-all shadow-sm focus:shadow-md text-lg font-semibold placeholder:text-slate-400 placeholder:font-medium"
+                    >
+                    <button 
+                        type="submit" 
+                        class="absolute right-2 top-2 bottom-2 bg-slate-900 hover:bg-brand-600 text-white font-bold px-6 rounded-xl transition-all duration-300 shadow-md hover:shadow-glow flex items-center gap-2"
+                    >
+                        <span>Create</span>
+                    </button>
+                </form>
             </div>
 
-            <!-- Task List -->
-            <div class="flex-1 overflow-y-auto pr-2 pb-4 -mr-2 space-y-3">
-                @if(isset($tasks) && count($tasks) === 0)
-                    <div class="flex flex-col items-center justify-center h-full min-h-[250px] text-center">
-                        <div class="w-24 h-24 bg-white rounded-full shadow-sm flex items-center justify-center mb-5 relative">
-                            <i data-lucide="sparkles" class="w-10 h-10 text-brand-400"></i>
-                            <div class="absolute inset-0 border-2 border-brand-200 rounded-full animate-ping opacity-20"></div>
+            <!-- Kanban Board -->
+            <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden pb-2 -mx-2 px-2">
+                <div class="flex gap-6 h-full min-w-[900px]">
+                    
+                    <!-- Doing Column -->
+                    <div class="flex flex-col w-1/3 bg-slate-100/60 rounded-3xl p-4 border border-slate-200/80 shadow-inner h-full">
+                        <div class="flex items-center justify-between mb-4 px-2">
+                            <div class="flex items-center gap-2">
+                                <div class="w-3 h-3 rounded-full bg-slate-400"></div>
+                                <h3 class="text-sm font-extrabold text-slate-700 uppercase tracking-wider">Doing</h3>
+                            </div>
+                            <span class="bg-slate-200 text-slate-600 text-xs font-bold px-2 py-1 rounded-full count-badge">{{ $doingTasks->count() }}</span>
                         </div>
-                        <h3 class="text-xl font-extrabold text-slate-800">You're all caught up!</h3>
-                        <p class="text-slate-500 font-medium mt-2 max-w-sm">No pending tasks found. Enjoy your free time or create a new task to stay productive.</p>
+                        <div id="col-doing" class="kanban-col flex-1 overflow-y-auto space-y-3 p-1 min-h-[150px]" data-status="doing">
+                            @foreach($doingTasks as $task)
+                                @include('components.task-card', ['task' => $task])
+                            @endforeach
+                        </div>
                     </div>
-                @else
-                    @foreach($tasks as $index => $task)
-                        <div class="task-item group flex items-center justify-between p-4 px-5 rounded-2xl bg-white hover:bg-slate-50/80 border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300" style="animation-delay: {{ $index * 50 }}ms;">
-                            
-                            <div class="flex items-center gap-4 flex-1">
-                                <form action="/tugas/{{ $task->id }}" method="POST" class="flex-shrink-0">
-                                    @csrf
-                                    @method('PATCH')
-                                    <button type="submit" class="w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all duration-300 {{ $task->is_selesai ? 'bg-emerald-500 border-emerald-500 text-white shadow-md shadow-emerald-200' : 'border-slate-300 hover:border-brand-500 text-transparent hover:text-brand-200 bg-slate-50' }}" title="{{ $task->is_selesai ? 'Mark as incomplete' : 'Mark as complete' }}">
-                                        <i data-lucide="check" class="w-4 h-4 {{ $task->is_selesai ? 'opacity-100' : 'opacity-0' }} transition-opacity stroke-[3]"></i>
-                                    </button>
-                                </form>
-                                
-                                <span class="text-slate-700 font-semibold text-[1.05rem] transition-all duration-300 {{ $task->is_selesai ? 'line-through text-slate-400' : '' }}">
-                                    {{ $task->nama_tugas }}
-                                </span>
-                            </div>
 
-                            <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 ml-4 focus-within:opacity-100">
-                                <form action="/tugas/{{ $task->id }}" method="POST" onsubmit="return confirm('Delete this task?');">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" class="flex items-center justify-center w-9 h-9 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all outline-none focus:ring-2 focus:ring-red-200" title="Delete Task">
-                                        <i data-lucide="trash-2" class="w-4.5 h-4.5"></i>
-                                    </button>
-                                </form>
+                    <!-- On Progress Column -->
+                    <div class="flex flex-col w-1/3 bg-blue-50/60 rounded-3xl p-4 border border-blue-100/80 shadow-inner h-full">
+                        <div class="flex items-center justify-between mb-4 px-2">
+                            <div class="flex items-center gap-2">
+                                <div class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
+                                <h3 class="text-sm font-extrabold text-blue-800 uppercase tracking-wider">On Progress</h3>
                             </div>
+                            <span class="bg-blue-200 text-blue-800 text-xs font-bold px-2 py-1 rounded-full count-badge">{{ $onProgressTasks->count() }}</span>
                         </div>
-                    @endforeach
-                @endif
+                        <div id="col-on_progress" class="kanban-col flex-1 overflow-y-auto space-y-3 p-1 min-h-[150px]" data-status="on_progress">
+                            @foreach($onProgressTasks as $task)
+                                @include('components.task-card', ['task' => $task])
+                            @endforeach
+                        </div>
+                    </div>
+
+                    <!-- Done Column -->
+                    <div class="flex flex-col w-1/3 bg-emerald-50/60 rounded-3xl p-4 border border-emerald-100/80 shadow-inner h-full">
+                        <div class="flex items-center justify-between mb-4 px-2">
+                            <div class="flex items-center gap-2">
+                                <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+                                <h3 class="text-sm font-extrabold text-emerald-800 uppercase tracking-wider">Done</h3>
+                            </div>
+                            <span class="bg-emerald-200 text-emerald-800 text-xs font-bold px-2 py-1 rounded-full count-badge">{{ $doneTasks->count() }}</span>
+                        </div>
+                        <div id="col-done" class="kanban-col flex-1 overflow-y-auto space-y-3 p-1 min-h-[150px]" data-status="done">
+                            @foreach($doneTasks as $task)
+                                @include('components.task-card', ['task' => $task])
+                            @endforeach
+                        </div>
+                    </div>
+
+                </div>
             </div>
 
         </div>
@@ -247,16 +295,87 @@
         // Real-time Clock WIB
         function updateClock() {
             const now = new Date();
-            // Optional: You could use local time if it matches WIB, or force it using options
             const options = { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
             const timeString = now.toLocaleTimeString('id-ID', options);
             document.getElementById('realtime-clock').textContent = timeString;
         }
         
-        // Initial call
         updateClock();
-        // Update every second
         setInterval(updateClock, 1000);
+
+        // Sortable JS Init
+        const columns = ['doing', 'on_progress', 'done'];
+        
+        columns.forEach(col => {
+            const el = document.getElementById(`col-${col}`);
+            new Sortable(el, {
+                group: 'trello-board',
+                animation: 200,
+                ghostClass: 'sortable-ghost',
+                delay: 50,
+                delayOnTouchOnly: true,
+                onEnd: function (evt) {
+                    const itemEl = evt.item;
+                    const taskId = itemEl.getAttribute('data-id');
+                    const toCol = evt.to.getAttribute('data-status');
+                    const fromCol = evt.from.getAttribute('data-status');
+                    
+                    if(toCol !== fromCol) {
+                        // Update Badges
+                        updateBadges();
+                        
+                        // Send AJAX
+                        fetch(`/tugas/${taskId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                                'Accept': 'application/json'
+                            },
+                            body: JSON.stringify({ status: toCol })
+                        }).then(res => res.json())
+                          .then(data => {
+                              if(data.success) {
+                                  // Update internal styling if moved to done or out of done
+                                  const textEl = itemEl.querySelector('.task-text');
+                                  if(toCol === 'done') {
+                                      textEl.classList.add('line-through', 'text-slate-400');
+                                  } else {
+                                      textEl.classList.remove('line-through', 'text-slate-400');
+                                  }
+                              } else {
+                                  alert('Gagal update status tugas.');
+                                  window.location.reload();
+                              }
+                          }).catch(err => {
+                              console.error(err);
+                              window.location.reload();
+                          });
+                    }
+                }
+            });
+        });
+
+        function updateBadges() {
+            let totalDone = 0;
+            columns.forEach(col => {
+                const el = document.getElementById(`col-${col}`);
+                const count = el.children.length;
+                el.parentElement.querySelector('.count-badge').textContent = count;
+                if(col === 'done') totalDone = count;
+            });
+
+            // Update Global Stats
+            const total = {{ $total }};
+            const pending = total - totalDone;
+            const progress = total > 0 ? Math.round((totalDone / total) * 100) : 0;
+
+            document.getElementById('stat-done').textContent = totalDone;
+            document.getElementById('stat-pending').textContent = pending;
+            document.getElementById('stat-completed').textContent = totalDone;
+            document.getElementById('stat-percent').textContent = progress + '%';
+            document.getElementById('stat-progress-bar').style.width = progress + '%';
+        }
     </script>
 </body>
 </html>
