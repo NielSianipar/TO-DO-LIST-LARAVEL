@@ -23,5 +23,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/tugas', [TaskController::class, 'store']);
     Route::delete('/tugas/{id}', [TaskController::class, 'destroy']);
     Route::patch('/tugas/{id}', [TaskController::class, 'update']);
+    
+    // Project Routes
+    Route::post('/projects', [\App\Http\Controllers\ProjectController::class, 'store'])->name('projects.store');
+    Route::delete('/projects/{project}', [\App\Http\Controllers\ProjectController::class, 'destroy'])->name('projects.destroy');
+    
+    // Project Member Routes
+    Route::post('/projects/{project}/members', [\App\Http\Controllers\ProjectMemberController::class, 'store'])->name('projects.members.store');
+    Route::delete('/projects/{project}/members/{user}', [\App\Http\Controllers\ProjectMemberController::class, 'destroy'])->name('projects.members.destroy');
 });
-
